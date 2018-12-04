@@ -86,12 +86,12 @@ class TFT:
         return inner_tf_compatible_main
 
 
-__to_tf_type = {INT: tf.int32,
+__to_tf_type = {INT: tf.int64,
                 FLOAT: tf.float32,
                 BYTES: tf.string}
 
 
-__to_np_type = {INT: np.int32,
+__to_np_type = {INT: np.int64,
                 FLOAT: np.float32,
                 BYTES: np.bytes_}
 
@@ -120,11 +120,7 @@ def tf_metadata_schema_feature_to_feature_spec(feature):
     __assert_not_none(feature)
     if feature.HasField("shape"):
         shape = tuple(d.size for d in feature.shape.dim)
-        # NOTE: we set default_value only for the PoC, we would not do this in production!
-        default_value = np.zeros(shape, __to_np_type[feature.type])
-        return feature.name, tf.FixedLenFeature(shape=shape,
-                                                dtype=__to_tf_type[feature.type],
-                                                default_value=default_value)
+        return feature.name, tf.FixedLenFeature(shape=shape, dtype=__to_tf_type[feature.type])
     else:
         return feature.name, tf.VarLenFeature(dtype=__to_tf_type[feature.type])
 
@@ -215,16 +211,16 @@ def tftransform(dataflow_args,  # type: List[str]
 
     pipeline = beam.Pipeline(argv=dataflow_args)
     with beam_impl.Context(temp_dir=temp_location):
+        coder = ExampleProtoCoder(raw_data_metadata.schema)
         raw_data = (
                 pipeline
-                | "ReadTrainData" >> tfrecordio.ReadFromTFRecord(training_data,
-                                                                 coder=ExampleProtoCoder(raw_data_metadata.schema),  # noqa: E501
-                                                                 validate=True))
+                | "ReadTrainData" >> tfrecordio.ReadFromTFRecord(training_data)  # noqa: E501
+                | 'DecodeTrain' >> beam.Map(coder.decode))
 
         raw_dataset = (raw_data, raw_data_metadata)
         transformed_dataset, transform_fn = (
                 raw_dataset
-                | beam_impl.AnalyzeAndTransformDataset(preprocessing_fn))
+                | 'AnalyzeAndTransform' >> beam_impl.AnalyzeAndTransformDataset(preprocessing_fn))
 
         transformed_data, transformed_metadata = transformed_dataset
         transformed_data_coder = ExampleProtoCoder(transformed_metadata.schema)
