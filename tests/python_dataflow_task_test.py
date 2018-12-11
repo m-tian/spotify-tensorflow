@@ -18,10 +18,11 @@
 from __future__ import absolute_import, division, print_function
 
 from unittest import TestCase
+import subprocess
 
 import luigi
 from luigi.contrib.gcs import GCSTarget
-from spotify_tensorflow.luigi.python_dataflow_task import PythonDataflowTask
+from spotify_tensorflow.luigi.python_dataflow_task import PythonDataflowTask, run_with_logging
 
 
 class DummyRawFeature(luigi.ExternalTask):
@@ -29,15 +30,11 @@ class DummyRawFeature(luigi.ExternalTask):
         return GCSTarget("output_uri")
 
 
-class DummyTFXTask(PythonDataflowTask):
+class DummyPythonDataflowTask(PythonDataflowTask):
     python_script = "pybeamjob.py"
     requirements_file = "tfx_requirement.txt"
-
-    def tfx_args(self):
-        return ["--schema_file=schema.pb"]
-
-
-class DummyUserTfxTask(DummyTFXTask):
+    zone = "zone"
+    region = "region"
     project = "dummy"
     worker_machine_type = "n1-standard-4"
     num_workers = 5
@@ -46,6 +43,12 @@ class DummyUserTfxTask(DummyTFXTask):
     service_account = "dummy@dummy.iam.gserviceaccount.com"
     local_runner = True
     staging_location = "staging_uri"
+    temp_location = "tmp"
+    network = "network"
+    subnetwork = "subnetwork"
+    disk_size_gb = 30
+    worker_disk_type = "disc_type"
+    job_name = "dummy"
 
     def requires(self):
         return {"input": DummyRawFeature()}
@@ -57,10 +60,27 @@ class DummyUserTfxTask(DummyTFXTask):
         return GCSTarget(path="output_uri")
 
 
+class PythonDataflowTaskFailedOnValidation(PythonDataflowTask):
+    python_script = "pybeamjob.py"
+
+    # override to construct a test run
+    def _mk_cmd_line(self):
+        return ["python", "-c", "\"print(1)\""]
+
+    def validate_output(self):
+        return False
+
+    def args(self):
+        return ["--foo=bar"]
+
+    def output(self):
+        return GCSTarget(path="output_uri")
+
+
 class PythonDataflowTaskTest(TestCase):
 
     def test_task(self):
-        task = DummyUserTfxTask()
+        task = DummyPythonDataflowTask()
 
         expected = [
             "python",
@@ -76,10 +96,35 @@ class PythonDataflowTaskTest(TestCase):
             "--staging_location=staging_uri",
             "--requirements_file=tfx_requirement.txt",
             "--worker_machine_type=n1-standard-4",
-            "--schema_file=schema.pb",
-            "--foo=bar"
+            "--foo=bar",
+            "--temp_location=tmp",
+            "--network=network",
+            "--subnetwork=subnetwork",
+            "--disk_size_gb=30",
+            "--worker_disk_type=disc_type",
+            "--job_name=dummy",
+            "--zone=zone",
+            "--region=region"
         ]
         expected.sort()
         actual = task._mk_cmd_line()
         actual.sort()
         self.assertEquals(actual, expected)
+
+    def test_run_with_logging(self):
+        actual = run_with_logging(["python", "-c", "print(1)"])
+        self.assertEquals(actual, 0)
+
+        try:
+            run_with_logging(["python", "-c", "import sys; sys.exit(1)"])
+            self.assertTrue(False)
+        except subprocess.CalledProcessError:
+            self.assertTrue(True)
+
+    def test_task_failed_on_validation(self):
+        task = PythonDataflowTaskFailedOnValidation()
+        try:
+            task.run()
+            self.assertTrue(False)
+        except ValueError:
+            self.assertTrue(True)

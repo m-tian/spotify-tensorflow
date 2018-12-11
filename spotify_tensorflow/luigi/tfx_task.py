@@ -21,7 +21,30 @@ from abc import abstractmethod
 from spotify_tensorflow.luigi.python_dataflow_task import PythonDataflowTask
 
 
-class TFTransformTask(PythonDataflowTask):
+class TFXBaseTask(PythonDataflowTask):
+    def __init__(self, *args, **kwargs):
+        super(TFXBaseTask, self).__init__(*args, **kwargs)
+        self.job_name = self.__class__.__name__
+
+    def tfx_args(self):
+        """ Extra arguments that will be passed to your tfx dataflow job.
+
+        Example:
+            return ["--schema_file=gs://uri/to/schema_file"]
+        Note that:
+
+            * You "set" args by overriding this method in your tfx subclass.
+            * This function should return an iterable of strings.
+        """
+        return []
+
+    def _mk_cmd_line(self):
+        cmd_line = super(TFXBaseTask, self)._mk_cmd_line()
+        cmd_line.extend(self.tfx_args())
+        return cmd_line
+
+
+class TFTransformTask(TFXBaseTask):
     def __init__(self, *args, **kwargs):
         super(TFTransformTask, self).__init__(*args, **kwargs)
         self.job_name = self.__class__.__name__

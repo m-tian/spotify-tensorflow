@@ -31,7 +31,12 @@ class PythonDataflowTask(MixinNaiveBulkComplete, luigi.Task):
     """"Luigi wrapper for a dataflow job
 
     The following properties can be set:
-
+    python_script = None            # Python script for the dataflow task.
+    project = None                  # Name of the project owning the dataflow job.
+    staging_location = None         # GCS path for staging code packages needed by workers.
+    zone = None                     # GCE availability zone for launching workers.
+    region = None                   # GCE region for creating the dataflow job.
+    temp_location = None            # GCS path for saving temporary workflow jobs.
     num_workers = None              # The number of workers to start the task with.
     autoscaling_algorithm = None    # Set to "NONE" to disable autoscaling. `num_workers`
                                     # will then be used for the job.
@@ -41,11 +46,13 @@ class PythonDataflowTask(MixinNaiveBulkComplete, luigi.Task):
     disk_size_gb = None             # Remote worker disk size, if not defined uses default size.
     worker_machine_type = None      # Machine type to create Dataflow worker VMs. If unset,
                                     # the Dataflow service will choose a reasonable default.
-    jvm_opts = []                   # Extra JVM options
-    job_name = None                 # Custom job name, must be unique across project"s active jobs
     worker_disk_type = None         # Specify SSD for local disk or defaults to hard disk.
     service_account = None          # Service account of Dataflow VMs/workers. Default is a
                                       default GCE service account.
+    job_name = None                 # Name of the dataflow job
+    requirements_file = None        # Path to a requirements file containing package dependencies.
+    local_runner = False            # If local_runner = True, the job uses DirectRunner,
+                                      otherwise it uses DataflowRunner
 
     :Example:
 
@@ -82,10 +89,7 @@ class PythonDataflowTask(MixinNaiveBulkComplete, luigi.Task):
     worker_disk_type = None
     service_account = None
     job_name = None
-
-    # requirements_file for workers
     requirements_file = None
-
     local_runner = False
 
     def __init__(self, *args, **kwargs):
@@ -150,7 +154,6 @@ class PythonDataflowTask(MixinNaiveBulkComplete, luigi.Task):
         cmd_line.extend(self._get_dataflow_args())
         cmd_line.extend(self._get_input_args())
         cmd_line.extend(self._get_output_args())
-        cmd_line.extend(self.tfx_args())
         cmd_line.extend(self.args())
         return cmd_line
 
@@ -172,6 +175,10 @@ class PythonDataflowTask(MixinNaiveBulkComplete, luigi.Task):
         return file_pattern
 
     def _get_input_args(self):
+        """
+        Collects outputs from requires() and converts them to input arguments.
+        file_pattern() is called to construct input file path glob with default value "part-*"
+        """
         job_input = self.input()
         if isinstance(job_input, luigi.Target):
             job_input = {"input": job_input}
@@ -253,18 +260,6 @@ class PythonDataflowTask(MixinNaiveBulkComplete, luigi.Task):
             dataflow_args += ["--requirements_file={}".format(self.requirements_file)]
 
         return dataflow_args
-
-    def tfx_args(self):
-        """ Extra arguments that will be passed to your tfx dataflow job.
-
-        Example:
-            return ["--schema_file=gs://uri/to/schema_file"]
-        Note that:
-
-            * You "set" args by overriding this method in your tfx subclass.
-            * This function should return an iterable of strings.
-        """
-        return []
 
     def args(self):
         """ Extra arguments that will be passed to your dataflow job.
